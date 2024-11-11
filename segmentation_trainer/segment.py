@@ -40,11 +40,17 @@ class TrainingLogger():
 class ResNet34SegmentationModel(nn.Module):
     def __init__(self, num_classes=24):
         super(ResNet34SegmentationModel, self).__init__()
-#Need to add in LR scheduler
-#Need to save train loss and acc
-        self.base = torch.hub.load('pytorch/vision:v0.10.0', 'resnet34', pretrained=True)
+
+        self.base = torch.hub.load('pytorch/vision:v0.10.0', 'resnet50', pretrained=True)
+        print(self.base)
+        print('-------------------------------------------')
         self.encoder = nn.Sequential(*list(self.base.children())[:-2])
+        print(self.encoder)
         self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(2048, 1024, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ReLU(),
             nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
             nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
@@ -57,7 +63,10 @@ class ResNet34SegmentationModel(nn.Module):
         )
 
     def forward(self, input):
-        return self.decoder(self.encoder(input))
+        encoded = self.encoder(input)
+        print(encoded.shape)
+        decoded = self.decoder(encoded)
+        return decoded
 
 class SegmentationDataset(Dataset):
     def __init__(self, image_dir, mask_dir):
