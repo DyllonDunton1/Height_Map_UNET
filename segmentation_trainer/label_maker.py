@@ -3,12 +3,17 @@ import os
 import numpy as np
 from torchvision import io, transforms, models
 import torch.nn.functional as F
+from torchvision.transforms.functional import crop
 import torch
 import warnings
 warnings.filterwarnings("ignore")
 
 transform = transforms.Compose([
                 transforms.CenterCrop(224),
+                #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+img_transform = transforms.Compose([
+                transforms.ToTensor(),
                 #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
 
@@ -21,7 +26,7 @@ current_dir = "data/train_labels_small"
 output_dir = "data/train_labels_index"
 dir_list = sorted(os.listdir(current_dir))
 
-if True:
+if False:
     for img_path in dir_list:
         img = Image.open(f"{current_dir}/{img_path}")
         img_array = np.array(img)
@@ -40,10 +45,54 @@ if True:
         print(output_tensor.shape)
         torch.save(output_tensor, out_path)
 
-#img_tensor = torch.load(f"{output_dir}/540.pt")
-#print(img_tensor.shape)
-#ew_tensor = transform(img_tensor)
-#print(new_tensor.shape)
+
+img_dir = "data/train_imgs_small"
+mask_dir = "data/train_labels_index"
+img_tensor = img_transform(Image.open(f"{img_dir}/000.jpg"))
+mask_tensor = torch.load(f"{mask_dir}/000.pt")
+print(img_tensor.shape, mask_tensor.shape)
+
+
+top = int((256-224)*np.random.rand()//1)
+left = int((256-224)*np.random.rand()//1)
+
+print(top,left)
+width = 224
+
+
+img_crop = img_tensor[:, top:top+width, left:left+width]
+mask_crop = mask_tensor[:, top:top+width, left:left+width]
+print(img_crop.shape, mask_crop.shape)
+
+# Random Vertical Flip
+vert_chance = np.random.rand()
+hori_chance = np.random.rand()
+print(vert_chance, hori_chance)
+if (vert_chance > 0.5):
+    #do vertical flip
+    print("VERT")
+    img_vert = torch.flip(img_crop, dims=[1])
+else:
+    img_vert = img_crop
+
+# Random Horizontal Flip
+if (hori_chance > 0.5):
+    #do horizontal flip
+    print("HOR")
+    img_hori = torch.flip(img_vert, dims=[2])
+else:
+    img_hori = img_vert
+
+rot_count = int(4*np.random.rand())
+print(rot_count)
+img_rot90 = torch.rot90(img_crop, rot_count, [1,2])
+mask_rot90 = torch.rot90(mask_crop, rot_count, [1,2])
+print(img_rot90.shape, mask_rot90.shape)
+
+to_pil_image = transforms.ToPILImage()
+new_image = to_pil_image(img_rot90)
+
+new_image.show()
 
 
 
