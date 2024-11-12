@@ -1,1 +1,8 @@
 /data
+/segmentation_trainer/data
+/segmentation_trainer/data.zip
+/ZoeDepth
+/zoe_depth_map/data/cityscapes
+/zoe_depth_map/data/marsscapes
+/zoe_depth_map/data/output.zip
+/zoe_depth_map/data/output

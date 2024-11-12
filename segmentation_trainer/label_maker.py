@@ -46,6 +46,7 @@ if False:
         torch.save(output_tensor, out_path)
 
 
+'''
 img_dir = "data/train_imgs_small"
 mask_dir = "data/train_labels_index"
 img_tensor = img_transform(Image.open(f"{img_dir}/000.jpg"))
@@ -95,6 +96,6 @@ new_image = to_pil_image(img_rot90)
 new_image.show()
 
 
-
+'''
 
 
