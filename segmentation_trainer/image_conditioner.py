@@ -13,16 +13,16 @@ VAL_PATH_LABELS = "/home/dunto/cos573/segmentation_trainer/data/Validation_Label
 DATA_PATH = "/home/dunto/cos573/segmentation_trainer/data"
 
 
-dir = "val_index_large"
-current_dir = f"/home/dunto/Height_Map_UNET/segmentation_trainer/data/{dir}"
+dir = "val_labels_large"
+current_dir = f"data/{dir}"
 dir_list = sorted(os.listdir(current_dir))
 print(f"Found {len(dir_list)} images")
 for i, img in enumerate(dir_list):
     image = Image.open(f"{current_dir}/{img}")
     print(image.size)
-    image_small = image.resize((3000,2000),Image.NEAREST)
-    assert image_small.size == (3000,2000)
-    output_path = f"{current_dir}/{img}".replace(".jpg","_conditioned.jpg")
+    image_small = image.resize((1080,720),Image.NEAREST)
+    assert image_small.size == (1080,720)
+    output_path = f"{current_dir}/{img}".replace("_conditioned.jpg",".jpg")
     image_small.save(output_path)
     print(i)
     

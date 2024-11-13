@@ -22,24 +22,24 @@ colors = [[0, 0, 0],[128, 64, 128],[130, 76, 0],[0, 102, 0],[112, 103, 87],[28, 
 label_color = list(zip(labels,colors))
 
 
-current_dir = "data/train_labels_small"
-output_dir = "data/train_labels_index"
+current_dir = "data/val_index_large"
+output_dir = "data/val_index_large"
 dir_list = sorted(os.listdir(current_dir))
 
-if False:
+if True:
     for img_path in dir_list:
         img = Image.open(f"{current_dir}/{img_path}")
         img_array = np.array(img)
         #print(img_array.shape)
-        
-        output_img = np.zeros((256,256,24))
-        for x, row in enumerate(img_array):
-            for y, pixel in enumerate(row):
+        #print(img_array)
+
+        output_img = np.zeros((720,1080,24))
+        for y, row in enumerate(img_array):
+            for x, pixel in enumerate(row):
                 #print(list(pixel))
-                index = colors.index(list(pixel))
-                output_img[x][y] = np.eye(24)[index]
+                output_img[y][x] = np.eye(24)[pixel]
         
-        out_path = f"{output_dir}/{img_path.split('.')[0]}.pt"
+        out_path = f"{current_dir}/{img_path.split('.')[0]}.pt"
         print(out_path)
         output_tensor = torch.from_numpy(output_img.transpose(2, 0, 1))
         print(output_tensor.shape)
