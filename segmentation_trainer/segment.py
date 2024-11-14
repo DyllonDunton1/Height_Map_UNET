@@ -40,8 +40,7 @@ class TrainingLogger():
 class ResNet34SegmentationModel(nn.Module):
     def __init__(self, num_classes=24):
         super(ResNet34SegmentationModel, self).__init__()
-#Need to add in LR scheduler
-#Need to save train loss and acc
+
         self.base = torch.hub.load('pytorch/vision:v0.10.0', 'resnet34', pretrained=True)
         self.encoder = nn.Sequential(*list(self.base.children())[:-2])
         self.decoder = nn.Sequential(
