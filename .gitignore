@@ -1,1 +1,5 @@
 /data
+/zoe_depth_map/video_data
+/zoe_depth_map/ZoeDepth
+/segmentation_trainer/data
+/segmentation_trainer/segmentation_model_91_683.pth

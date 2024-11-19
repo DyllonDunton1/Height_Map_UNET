@@ -38,7 +38,7 @@ def convert_to_depth_tensor(img, model):
     return depth_tensor_flipped.int()
 
 
-def convert_mp4_to_frames(vid_path):
+def convert_mp4_to_frames(vid_path, rot):
     print(vid_path)
     cap = cv2.VideoCapture(vid_path)
     frames = []
@@ -48,7 +48,8 @@ def convert_mp4_to_frames(vid_path):
             break
         
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
+        if rot:
+            image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
         frames.append(image)
     cap.release()
     return frames
@@ -65,7 +66,9 @@ def crop_img(stitched_np):
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)[1]
     cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
                 cv2.CHAIN_APPROX_SIMPLE)
+    #print(cnts)
     cnts = imutils.grab_contours(cnts)
+    #print(cnts)
     c = max(cnts, key=cv2.contourArea)
     mask = np.zeros(thresh.shape, dtype="uint8")
     (x, y, w, h) = cv2.boundingRect(c)
@@ -86,14 +89,17 @@ def crop_img(stitched_np):
 
     return stitched_image
 
-def create_pano(vid_path):
-    frames = convert_mp4_to_frames(vid_path)
+def create_pano(vid_path, rot):
+    frames = convert_mp4_to_frames(vid_path, rot)
     trimmed_frames = []
     for i, frame in enumerate(frames):
-        if i%(len(frames)//6) == 0:
+        if i%(len(frames)//7) == 0:
             trimmed_frames.append(frame)
 
     ret, stitched_np = stitch_imgs(trimmed_frames)
+    #print(stitched_np.shape)
+    #img_pil = Image.fromarray(stitched_np)
+    #img_pil.show()
     if ret:
         print("Bad Stitching")
     stitched_image = crop_img(stitched_np)    

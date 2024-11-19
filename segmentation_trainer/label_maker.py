@@ -22,13 +22,14 @@ colors = [[0, 0, 0],[128, 64, 128],[130, 76, 0],[0, 102, 0],[112, 103, 87],[28, 
 label_color = list(zip(labels,colors))
 
 
-current_dir = "data/train_labels_large"
-output_dir = "data/train/labs"
-dir_list = sorted(os.listdir(output_dir))
-
-if True:
+current_dir = "data/val/labs"
+output_dir = "data/val/inds"
+dir_list = sorted(os.listdir(current_dir))
+print(len(dir_list))
+if False:
     for img_path in dir_list:
-        img = Image.open(f"{output_dir}/{img_path}")
+        img = Image.open(f"{current_dir}/{img_path}")
+        print(f"{current_dir}/{img_path}")
         img_array = np.array(img)
         print(img_array.shape)
         #assert img_array.shape == (224,3000,3)
@@ -40,25 +41,29 @@ if False:
     for img_path in dir_list:
         img = Image.open(f"{current_dir}/{img_path}")
         img.save(f"{current_dir}/{img_path.replace('.jpg','_con.jpg')}")
-if False:
-    for img_path in dir_list:
+if True:
+    for i, img_path in enumerate(dir_list):
+        #if i <= 8600:
+        #    continue
         img = Image.open(f"{current_dir}/{img_path}")
         img_array = np.array(img)
-        print(img_array.shape)
+        #print(img_array.shape)
+        #print(img_array)
         #print(img_array.max(), img_array.min())
         
-        output_img = torch.zeros((224,224,24)).int()
+        output_img = np.zeros((224,224,24))
         for x, row in enumerate(img_array):
             for y, pixel in enumerate(row):
-                print(list(pixel))
+                #print(list(pixel))
                 index = colors.index(list(pixel))
                 output_img[x][y] = np.eye(24)[index]
         
         out_path = f"{output_dir}/{img_path.replace('_con.jpg','')}.pt"
         #print(out_path)
-        output_tensor = torch.from_numpy(output_img.transpose(2, 0, 1))
+        output_tensor = torch.from_numpy(output_img.transpose(2, 0, 1)).to(torch.uint8)
         #print(output_tensor.shape)
         torch.save(output_tensor, out_path)
+        print(i)
 
 '''
 img_dir = "data/train_imgs_small"

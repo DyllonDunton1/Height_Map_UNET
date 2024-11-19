@@ -1,6 +1,5 @@
 import os
 from torchvision import io, transforms, models
-from torch.optim.lr_scheduler import StepLR
 import torch
 from torch import nn
 from PIL import Image
@@ -9,6 +8,7 @@ import torch.optim as optim
 import torchvision.transforms.functional as F
 import numpy as np
 import csv
+import gc
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -60,8 +60,8 @@ class ResNet34SegmentationModel(nn.Module):
 
 class SegmentationDataset(Dataset):
     def __init__(self, image_dir, mask_dir):
-        self.start_width = 256
-        self.end_width = 224
+        #self.start_width = 256
+        #self.end_width = 224
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.image_files = sorted(os.listdir(image_dir))  # Assuming files are matched by name
@@ -85,10 +85,10 @@ class SegmentationDataset(Dataset):
         mask = torch.load(mask_path)
 
         # Random crop Transform
-        top = int((self.start_width-self.end_width)*np.random.rand()//1)
-        left = int((self.start_width-self.end_width)*np.random.rand()//1)
-        image = image[:, top:top+self.end_width, left:left+self.end_width]
-        mask = mask[:, top:top+self.end_width, left:left+self.end_width]
+        #top = int((self.start_width-self.end_width)*np.random.rand()//1)
+        #left = int((self.start_width-self.end_width)*np.random.rand()//1)
+        #image = image[:, top:top+self.end_width, left:left+self.end_width]
+        #mask = mask[:, top:top+self.end_width, left:left+self.end_width]
 
         # Random Vertical Flip
         if (np.random.rand() > 0.5):
@@ -112,6 +112,8 @@ class SegmentationDataset(Dataset):
 def validation(model, val_loader, device):
     model.eval() # Set model to validation mode
 
+    running_sum = 0
+    running_num = 0
     with torch.no_grad():
         #only one batch since batch_size is full batch
         for i, (inputs, labels) in enumerate(val_loader):
@@ -126,24 +128,29 @@ def validation(model, val_loader, device):
             #print(labels_classified.shape, outputs_classified.shape)
 
             accuracy_mask = torch.where(labels_classified == outputs_classified, 1.0, 0.0)
-            accuracy = 100*(torch.sum(accuracy_mask) / torch.numel(accuracy_mask))
-            
+            running_sum += torch.sum(accuracy_mask)
+            running_num += torch.numel(accuracy_mask)
+
+            del inputs
+            del labels
+            del outputs
+            gc.collect()
+
+        accuracy = 100*(running_sum / running_num)
+
     model.train()
     return accuracy
 
 
-def train_model(model, train_loader, criterion, optimizer, device, lr_scheduler, train_log, num_epochs=10):
+def train_model(model, train_loader, criterion, optimizer, device, train_log, batch_size, lr, num_epochs=10):
     model.train()  # Set model to training mode
 
-    lr_steps_taken = 0
-    accuracy_lr_update_thresholds = [80, 90, 95, 98, 99, 99.5, 99.8]
-    epochs_since_last_step = 0
-
+    
     for epoch in range(num_epochs):
         running_loss = 0.0
         print("----------------------------------------------")
         print(f"Epoch [{epoch+1}/{num_epochs}]")
-        print(f"Learning Rate: {lr_scheduler.get_lr()}")
+        print(f"Learning Rate: {optimizer.param_groups[0]['lr']}")
         for i, (inputs, labels) in enumerate(train_loader):
             # Move data to device (e.g., GPU or CPU)
             inputs = inputs.to(device)
@@ -156,7 +163,7 @@ def train_model(model, train_loader, criterion, optimizer, device, lr_scheduler,
             outputs = model(inputs)
             #print(outputs.shape)
             # Compute loss
-            loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels.to(torch.float))
 
             # Backward pass and optimize
             loss.backward()
@@ -164,26 +171,25 @@ def train_model(model, train_loader, criterion, optimizer, device, lr_scheduler,
 
             # Print statistics
             running_loss += loss.item()
+
+            if i%10 == 9:
+                print(i*32, "/", 11160)
+
+            del inputs
+            del labels
+            del outputs
+            gc.collect()
         
-        print(f"Train Loss: {running_loss / 20:.4f}")
+        print(f"Train Loss: {running_loss / batch_size:.4f}")
         
         val_accuracy = validation(model, val_loader, device)
         print(f"Validation Accuracy: {val_accuracy:.4f}%")
         
-        log_point = TrainingLogPoint(epoch+1, *scheduler.get_lr(), running_loss/20, str(val_accuracy.item()))
+        log_point = TrainingLogPoint(epoch+1, optimizer.param_groups[0]['lr'], running_loss/batch_size, str(val_accuracy.item()))
         train_log.add_measurement(log_point)
 
         running_loss = 0.0
 
-        #Check to see if we should update LR or stop
-        epochs_since_last_step += 1
-        if val_accuracy >= accuracy_lr_update_thresholds[-1]:
-            print("Accuracy over 99.8%. Ending training")
-            break
-        if lr_steps_taken < accuracy_lr_update_thresholds[-1] and (val_accuracy >= accuracy_lr_update_thresholds[lr_steps_taken] or epochs_since_last_step > 100):
-            epochs_since_last_step = 0
-            lr_steps_taken += 1
-            lr_scheduler.step()
         
 
     print('-----------------------------------')
@@ -191,25 +197,30 @@ def train_model(model, train_loader, criterion, optimizer, device, lr_scheduler,
     torch.save(model.state_dict(), 'segmentation_model.pth')
     print('Model Saved @ segmentation_model.pth')
 
+load_model_and_continue = True
+log_num = 12
+train_images_path = "data/train/imgs"
+train_labels_path = "data/train/inds"
+val_images_path = "data/val/imgs"
+val_labels_path = "data/val/inds"
+batch_size = 36
 
-train_images_path = "data/train_imgs_small"
-train_labels_path = "data/train_labels_index"
-val_images_path = "data/val_imgs_small"
-val_labels_path = "data/val_labels_index"
-batch_size = 18
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = ResNet34SegmentationModel().to(device)
 
-model = ResNet34SegmentationModel()
+if load_model_and_continue:
+    state_dict = torch.load('segmentation_model.pth', map_location=device)
+    model.load_state_dict(state_dict) 
+
 train_dataset = SegmentationDataset(train_images_path, train_labels_path)
 val_dataset = SegmentationDataset(val_images_path, val_labels_path)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=len(os.listdir(val_images_path)), shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
-train_log = TrainingLogger("training_log.csv")
+lr = 1e-7
+train_log = TrainingLogger(f"training_log_{log_num}.csv")
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=1e-4)
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device)
+optimizer = optim.Adam(model.parameters(), lr=lr)
 
-train_model(model, train_loader, criterion, optimizer, device, scheduler, train_log, num_epochs=120)
+train_model(model, train_loader, criterion, optimizer, device, train_log, batch_size, lr, num_epochs=5)
 train_log.save()

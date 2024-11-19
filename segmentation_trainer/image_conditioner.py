@@ -11,8 +11,8 @@ labels = ["unlabeled","paved-area","dirt","grass","gravel","water","rocks","pool
 colors = [[0, 0, 0],[128, 64, 128],[130, 76, 0],[0, 102, 0],[112, 103, 87],[28, 42, 168],[48, 41, 30],[0, 50, 89],[107, 142, 35],[70, 70, 70],[102, 102, 156],[254, 228, 12],[254, 148, 12],[190, 153, 153],[153, 153, 153],[255, 22, 96],[102, 51, 0],[9, 143, 150],[119, 11, 32],[51, 51, 0],[190, 250, 190],[112, 150, 146],[2, 135, 115],[255, 0, 0]]
 
 
-current_dir = "data/train_imgs_large"
-output_dir = "data/train/imgs"
+current_dir = "data/t_la"
+output_dir = "data/train/labs"
 dir_list = sorted(os.listdir(current_dir))
 print(f"Found {len(dir_list)} images")
 #[12,8], [9,6]
@@ -24,17 +24,24 @@ for i, img in enumerate(dir_list):
     #print(image.size)
     
     for res in resolutions:
-        image_scaled = np.array(image.resize((photo_scale*res[0],photo_scale*res[1]),Image.NEAREST))
-        print(image_scaled.shape)
+        image_scaled = image.resize((photo_scale*res[0],photo_scale*res[1]),Image.NEAREST)
+        #print(image_scaled.size)
         
         for w in range(res[0]):
             for h in range(res[1]):
-                out_np = image_scaled[w*photo_scale:(w+1)*photo_scale, h*photo_scale:(h+1)*photo_scale, :]
-                
-                out_img = Image.fromarray(out_np)
-                print(res, w, h, out_np.shape)
+                top = h*photo_scale
+                bottom = (h+1)*photo_scale
+                left = w*photo_scale
+                right = (w+1)*photo_scale
+                out_img = image_scaled.crop((left,top,right,bottom))
+                out_np = np.array(out_img)
+                #print(res, w, h, out_np.shape)
+                #for x, row in enumerate(out_np):
+                #    for y, pixel in enumerate(row):
+                #        assert list(pixel) in colors
+
                 #print(out_img.size,f"{output_dir}/{img}_{photo_scale*res[0]}x{photo_scale*res[1]}_{res[1]*w + h}")
-                out_img.save(f"{output_dir}/{img.replace('_conditioned','')}_{photo_scale*res[0]}x{photo_scale*res[1]}_{res[1]*w + h}.jpg")
+                out_img.save(f"{output_dir}/{img.replace('_conditioned','')}_{photo_scale*res[0]}x{photo_scale*res[1]}_{res[1]*w + h}.png")
     
     print(i)
     
