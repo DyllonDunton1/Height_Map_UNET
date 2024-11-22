@@ -1,0 +1,3 @@
+[submodule "HeightmapVisualization"]
+	path = HeightmapVisualization
+	url = https://github.com/SophieWalden/HeightmapVisualization.git
