@@ -1,4 +1,6 @@
 import os
+from collections.abc import Callable
+
 from torchvision import io, transforms, models
 from torch.optim.lr_scheduler import StepLR
 import torch
@@ -18,6 +20,126 @@ from segmentation_trainer.segmentation_create import segment_model
 import warnings
 warnings.filterwarnings("ignore")
 
+
+def segment_with_shifted_patch_voting(
+    image_tensor: torch.Tensor,
+    segment_fn: Callable[[torch.Tensor], torch.Tensor],
+    patch_size: int = 200,
+    num_shifts: int = 5,
+    model_input_size: int = 224,
+) -> torch.Tensor:
+    """
+    Segment an image using multiple shifted patch grids and majority voting.
+
+    Large panoramic images can produce patch-boundary artifacts when each patch is
+    segmented independently. This function reduces those artifacts by running the
+    segmentation model over several grids with different offsets, then taking a
+    per-pixel majority vote across the shifted predictions.
+
+    Args:
+        image_tensor: Input image tensor in CHW format.
+        segment_fn: Function that accepts a CHW image patch and returns a 2D
+            class-index segmentation map.
+        patch_size: Spatial size of each patch in the stitched output.
+        num_shifts: Number of shifted grids used for voting.
+        model_input_size: Spatial size expected by the segmentation model.
+
+    Returns:
+        A 2D tensor of class indices with shape [working_height, working_width].
+    """
+    if image_tensor.ndim != 3:
+        raise ValueError(
+            f"Expected image_tensor in CHW format, got shape {tuple(image_tensor.shape)}"
+        )
+
+    _, image_height, image_width = image_tensor.shape
+
+    patches_wide = image_width // patch_size
+    patches_high = image_height // patch_size
+
+    if patches_wide == 0 or patches_high == 0:
+        raise ValueError(
+            "Image must be at least one patch wide and one patch high. "
+            f"Got image size {image_height}x{image_width} with patch_size={patch_size}."
+        )
+
+    working_width = patches_wide * patch_size
+    working_height = patches_high * patch_size
+
+    working_tensor = interpolate(
+        image_tensor.unsqueeze(0),
+        size=(working_height, working_width),
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze(0)
+
+    votes = torch.empty(
+        (num_shifts, working_height, working_width),
+        dtype=torch.long,
+        device=working_tensor.device,
+    )
+
+    shift_step = patch_size // num_shifts
+
+    for shift_index in range(num_shifts):
+        shift_amount = shift_step * shift_index
+
+        padded_tensor = pad(
+            working_tensor,
+            (
+                shift_amount,
+                patch_size - shift_amount,
+                shift_amount,
+                patch_size - shift_amount,
+            ),
+            mode="constant",
+            value=0,
+        )
+
+        aggregation = torch.empty(
+            (working_height + patch_size, working_width + patch_size),
+            dtype=torch.long,
+            device=working_tensor.device,
+        )
+
+        y_count = patches_high + int(shift_index != 0)
+        x_count = patches_wide + int(shift_index != 0)
+
+        for y_index in range(y_count):
+            for x_index in range(x_count):
+                top = y_index * patch_size
+                bottom = top + patch_size
+                left = x_index * patch_size
+                right = left + patch_size
+
+                patch_tensor = padded_tensor[:, top:bottom, left:right]
+
+                model_input = interpolate(
+                    patch_tensor.unsqueeze(0),
+                    size=(model_input_size, model_input_size),
+                    mode="bilinear",
+                    align_corners=False,
+                ).squeeze(0)
+
+                segmented_patch = segment_fn(model_input).float().unsqueeze(0)
+
+                resized_segmentation = interpolate(
+                    segmented_patch.unsqueeze(0),
+                    size=(patch_size, patch_size),
+                    mode="nearest",
+                ).squeeze().long()
+
+                aggregation[top:bottom, left:right] = resized_segmentation
+
+        votes[shift_index] = aggregation[
+            shift_amount : working_height + shift_amount,
+            shift_amount : working_width + shift_amount,
+        ]
+
+    majority_votes, _ = torch.mode(votes, dim=0)
+    return majority_votes
+
+
 def main(filename, rot):
 
     data_path = "zoe_depth_map/video_data"
@@ -28,35 +150,24 @@ def main(filename, rot):
     #Now that we have the depth tensor, we need to get split up the panorama and run the segmentation model
     #First find the height and width of the pano
     to_tensor = transforms.ToTensor()
-    shrink_tensor = transforms.Resize((112,112))
     to_pil_image = transforms.ToPILImage()
     pano_tensor = to_tensor(pano_pil)
     print(f"Depth Map Shape: {depth_map_tensor.shape}")
     print(f"RGB Original shape: {pano_tensor.shape}")
 
-    #Split image by dividing height by 2 and the width by num_images = 5
-    #Resize to be multiple of 224 resolution
-    pano_c, pano_h, pano_w = pano_tensor.shape
-    print(f"Pano Shape (c,h,w): ({pano_c}/{pano_h}/{pano_w})")
-    patch_size = 200
-    patches_wide = pano_w//patch_size
-    working_width = patches_wide*patch_size
-    patches_high = pano_h//patch_size
-    working_height = patches_high*patch_size
-    unsqueeze_tensor = pano_tensor.unsqueeze(0)
-    print(f"Unsqueeze: {unsqueeze_tensor.shape}")
-    working_tensor = interpolate(unsqueeze_tensor, size=(working_height, working_width), mode='bilinear', align_corners=False).squeeze(0)
-    print(f"Patched (Wide/High): {patches_wide}/{patches_high}")
-    print(f"Working tensor shape: {working_tensor.shape}")
+    majority_votes = segment_with_shifted_patch_voting(
+        image_tensor=pano_tensor,
+        segment_fn=segment_model,
+        patch_size=200,
+        num_shifts=5,
+        model_input_size=224,
+    )
 
-    #We will be taking 5 sets of grid meshes for segmentation, then having the 5 layers vote. 
-    #The mode on each pixel will be the vote to the final result
-    votes = torch.zeros((5, working_height, working_width))
-    print(f"Vote Tensor Shape: {votes.shape}")
+    classes_tensor = majority_votes.unsqueeze(0).permute(0, 2, 1)
+    classes_tensor = torch.flip(classes_tensor, dims=[-2]).squeeze(0)
+    #print(classes_tensor.shape)
+    #print(classes_tensor)
 
-
-    #Now go through each grid mesh and gather votes
-    #order: close, close_shift, mid, mid_shift, far
     labels = ["unlabeled","paved-area","dirt","grass","gravel","water","rocks","pool","vegetation","roof","wall","window","door","fence","fence-pole","person","dog","car","bicycle","tree","bald-tree","ar-marker","obstacle","conflicting"]
     ideal = [0,1,23,22,21,13,14,15,16,17,18]
     drivable = [2,3,4,6]
@@ -77,55 +188,8 @@ def main(filename, rot):
     segmented_image_pil = to_pil_image(rgb_tensor).rotate(-90, expand=True)
     segmented_image_pil.show()
     """
-    #close
-    for v in range(5):
-        print(f"Vote: {v}")
-        shift_amount = int(patch_size//5)*v
-        padded_working_tensor = pad(working_tensor, (shift_amount, patch_size-shift_amount, shift_amount, patch_size-shift_amount), mode='constant', value = 0)
-        #pad_pil = to_pil_image(padded_working_tensor)
-        #pad_pil.show()
-        aggregation = torch.zeros((working_height+patch_size, working_width+patch_size))
-        y_count = patches_high
-        x_count = patches_wide
-        if v != 0:
-            y_count += 1
-            x_count += 1
-        for y in range(y_count):
-            for x in range(x_count):
-                top = y*patch_size
-                bottom = top+patch_size
-                left = x*patch_size
-                right = left+patch_size
-                
-                #print(f"Top/Left-Bottom/Right: {top}/{left}-{bottom}/{right}")
 
-                section_tensor = padded_working_tensor[:, top:bottom, left:right]
-                input_tensor = interpolate(section_tensor.unsqueeze(0), size=(224, 224), mode='bilinear', align_corners=False).squeeze(0)
-                #print(f"input: {input_tensor.shape}")
-                segmented_tensor = segment_model(input_tensor).float().unsqueeze(0)
-                #print(f"segmented: {segmented_tensor.shape}")
-                segmented_resize_tensor = interpolate(segmented_tensor.unsqueeze(0), size=(patch_size, patch_size), mode='nearest').squeeze(0)
-                #print(f"resize: {segmented_resize_tensor.shape}")
-                aggregation[top:bottom, left:right] = segmented_resize_tensor
-        votes[v] = aggregation[shift_amount:working_height+shift_amount, shift_amount:working_width+shift_amount]
-        """
-        rgb_tensor = np.zeros((working_width, working_height, 3))
-        for y, row in enumerate(votes[v].unsqueeze(0).permute(0,2,1).squeeze(0)):
-            for x, index in enumerate(row):
-                rgb = colors[int(index)]
-                rgb_tensor[y][x] = rgb
-        to_pil_image = transforms.ToPILImage()
-        segmented_image_pil = to_pil_image(rgb_tensor).rotate(-90, expand=True)
-        segmented_image_pil.show()
-        """
-
-    majority_votes, _ = torch.mode(votes, dim=0)
-    classes_tensor = majority_votes.unsqueeze(0).permute(0,2,1)
-    classes_tensor = torch.flip(classes_tensor, dims=[-2]).squeeze(0)
-    #print(classes_tensor.shape)
-    #print(classes_tensor)
-
-
+    working_width, working_height = classes_tensor.shape
     ideality_tensor = np.zeros((working_width, working_height, 1))
     for y, row in enumerate(classes_tensor):
         for x, index in enumerate(row):
@@ -144,12 +208,15 @@ def main(filename, rot):
     adder = video_to_convert.split(".")[0]
     torch.save(ideality_tensor,f"segmented_{adder}.pt")
     torch.save(depth_map_tensor,f"depth_{adder}.pt")
-    torch.save(working_tensor,f"colored_{adder}.pt")
+    torch.save(pano_tensor,f"colored_{adder}.pt")
 
-filename = "corn-field-landscape"
-is_vertical_motion = True
-main(filename,is_vertical_motion)
-Pathfinding(filename).main_loop()
+
+if __name__ == "__main__":
+    filename = "corn-field-landscape"
+    is_vertical_motion = True
+
+    main(filename, is_vertical_motion)
+    Pathfinding(filename).main_loop()
 
 """
 segmented_image_pil.show()
@@ -168,4 +235,3 @@ print(len(labels))
 
 """
          
-
